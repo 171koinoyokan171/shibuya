@@ -14,7 +14,7 @@ MOSH_UFW="${MOSH_PORTS/:/\:}"   # ufw хочет 60000:60010 — формат с
 # (внешний высокий -> внутренний 22). Менять порт на сервере значит потерять
 # доступ, если забудешь про это при следующем подключении.
 section "sshd"
-if write_file /etc/ssh/sshd_config.d/99-shibuya.conf 0644 <<EOF
+write_file /etc/ssh/sshd_config.d/99-shibuya.conf 0644 <<EOF
 # shibuya: ужесточение SSH. Машина будет торчать в интернет через проброс.
 PermitRootLogin no
 PasswordAuthentication no
@@ -35,7 +35,7 @@ AllowAgentForwarding yes
 AllowTcpForwarding yes
 PermitTunnel no
 EOF
-then
+if changed; then
   # Валидация ДО перезагрузки: сломанный sshd_config на удалённой машине
   # означает поездку к ней. reload, а не restart — существующие сессии живут.
   if ! sshd -t; then
@@ -112,7 +112,7 @@ ufw status verbose | sed 's/^/    /'
 section "fail2ban"
 apt_install fail2ban
 
-if write_file /etc/fail2ban/jail.d/shibuya.local 0644 <<EOF
+write_file /etc/fail2ban/jail.d/shibuya.local 0644 <<EOF
 [DEFAULT]
 # ufw как исполнитель банов — иначе fail2ban полезет в iptables мимо ufw.
 banaction = ufw
@@ -127,7 +127,7 @@ enabled = true
 port    = ssh
 backend = systemd
 EOF
-then
+if changed; then
   systemctl restart fail2ban
 fi
 enable_now fail2ban.service

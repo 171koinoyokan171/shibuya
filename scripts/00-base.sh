@@ -12,7 +12,7 @@ ensure_dirs
 # apt встаёт в неразрешимый конфликт и НИЧЕГО не может доставить.
 # Плюс машина не получает весь класс не-security исправлений.
 section "apt: пул noble-updates"
-if write_file /etc/apt/sources.list.d/shibuya-updates.sources 0644 <<'EOF'
+write_file /etc/apt/sources.list.d/shibuya-updates.sources 0644 <<'EOF'
 # shibuya: в стоковом ubuntu.sources этого образа нет noble-updates.
 # Без него apt конфликтует сам с собой (bzip2 vs libbz2-1.0) и не ставит пакеты.
 Types: deb
@@ -21,7 +21,7 @@ Suites: noble-updates noble-backports
 Components: main restricted universe multiverse
 Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
 EOF
-then
+if changed; then
   _apt_updated=0
   apt_update_once
   log "подтягиваю отложенные обновления (это чинит конфликт bzip2)"
@@ -75,12 +75,12 @@ else
   skip "стоковый AcceptEnv уже закомментирован"
 fi
 
-if write_file /etc/ssh/sshd_config.d/10-shibuya-env.conf 0644 <<'EOF'
+write_file /etc/ssh/sshd_config.d/10-shibuya-env.conf 0644 <<'EOF'
 # macOS шлёт LC_CTYPE=UTF-8 — в Linux такой локали нет, она ломает сессию
 # и не даёт стартовать mosh-server. Принимаем только безопасный набор.
 AcceptEnv LANG LC_COLLATE LC_TIME LC_MESSAGES
 EOF
-then
+if changed; then
   sshd_changed=1
 fi
 
@@ -100,13 +100,13 @@ fi
 # OOM. zram живёт в оперативке (сжатие zstd), SD-карту не изнашивает совсем.
 section "zram-swap"
 apt_install zram-tools
-if write_file /etc/default/zramswap 0644 <<'EOF'
+write_file /etc/default/zramswap 0644 <<'EOF'
 # shibuya: сжатый swap в RAM. Диск не трогаем — SD-карта и так расходник.
 ALGO=zstd
 PERCENT=50
 PRIORITY=100
 EOF
-then
+if changed; then
   systemctl restart zramswap.service
 fi
 enable_now zramswap.service
@@ -122,7 +122,7 @@ fi
 # логи, пережившие ребут, важнее экономии записи. Но ограничиваем размер,
 # иначе он спокойно съест гигабайты на SD.
 section "journald"
-if write_file /etc/systemd/journald.conf.d/99-shibuya.conf 0644 <<'EOF'
+write_file /etc/systemd/journald.conf.d/99-shibuya.conf 0644 <<'EOF'
 [Journal]
 Storage=persistent
 Compress=yes
@@ -134,7 +134,7 @@ RuntimeMaxUse=64M
 RateLimitIntervalSec=30s
 RateLimitBurst=2000
 EOF
-then
+if changed; then
   systemctl restart systemd-journald
   ok "journald перезапущен"
 fi
@@ -168,14 +168,14 @@ fi
 # само — единственный способ поднять машину, к которой нет физического доступа.
 section "hardware watchdog"
 if [[ -e /dev/watchdog0 ]]; then
-  if write_file /etc/systemd/system.conf.d/99-shibuya-watchdog.conf 0644 <<'EOF'
+  write_file /etc/systemd/system.conf.d/99-shibuya-watchdog.conf 0644 <<'EOF'
 [Manager]
 # Ядро живо -> systemd гладит watchdog каждые 30с. Зависло -> железный ребут.
 RuntimeWatchdogSec=30
 # Если сам ребут завис на 5 минут — добить железом.
 RebootWatchdogSec=5min
 EOF
-  then
+  if changed; then
     systemctl daemon-reexec
     ok "watchdog настроен (применён через daemon-reexec)"
   fi

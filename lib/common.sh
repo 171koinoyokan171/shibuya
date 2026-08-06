@@ -128,9 +128,24 @@ backup_file() {
   fi
 }
 
+# Признак "последняя write_file/ensure_line/ensure_block что-то изменила".
+#
+# Раньше эти функции сообщали об этом кодом возврата 1 = "без изменений".
+# Под `set -e` это оказалось миной: любой вызов, не обёрнутый в `if` или
+# `|| true`, ронял скрипт на ВТОРОМ прогоне — то есть ровно тогда, когда
+# идемпотентность должна была работать. Забыть обёртку слишком легко
+# (забыл в 12 местах из 14). Теперь функции всегда возвращают 0, а признак
+# изменения читается через changed().
+SHIBUYA_CHANGED=0
+
+# Изменил ли последний вызов write_file/ensure_line/ensure_block файл?
+#   write_file /etc/foo.conf <<EOF ... EOF
+#   if changed; then systemctl restart foo; fi
+changed() { [[ "${SHIBUYA_CHANGED:-0}" == "1" ]]; }
+
 # Записать файл с нужным содержимым и правами. Если содержимое уже такое —
-# ничего не делает и сообщает об этом (чтобы не дёргать лишние рестарты).
-# Возвращает 0 если файл ИЗМЕНИЛСЯ, 1 если остался прежним.
+# ничего не делает (чтобы не дёргать лишние рестарты). Всегда возвращает 0;
+# факт изменения — через changed().
 write_file() {
   local path="$1" mode="${2:-0644}" owner="${3:-root:root}"
   local tmp; tmp="$(mktemp)"
@@ -139,12 +154,14 @@ write_file() {
     rm -f "$tmp"
     chmod "$mode" "$path"; chown "$owner" "$path"
     skip "без изменений: $path"
-    return 1
+    SHIBUYA_CHANGED=0
+    return 0
   fi
   backup_file "$path"
   install -D -m "$mode" -o "${owner%%:*}" -g "${owner##*:}" "$tmp" "$path"
   rm -f "$tmp"
   ok "записан: $path"
+  SHIBUYA_CHANGED=1
   return 0
 }
 
@@ -156,17 +173,20 @@ write_user_file() {
   write_file "${home}/${rel}" "$mode" "${u}:${u}"
 }
 
-# Гарантирует наличие строки в файле (по якорю-regexp для поиска дубля).
+# Гарантирует наличие строки в файле (по якорю для поиска дубля).
+# Всегда возвращает 0; факт добавления — через changed().
 ensure_line() {
   local file="$1" line="$2" match="${3:-$2}"
   touch "$file"
   if grep -qF -- "$match" "$file" 2>/dev/null; then
     skip "строка уже есть в $file"
-    return 1
+    SHIBUYA_CHANGED=0
+    return 0
   fi
   backup_file "$file"
   printf '%s\n' "$line" >> "$file"
   ok "добавлено в $file: $line"
+  SHIBUYA_CHANGED=1
   return 0
 }
 
@@ -185,7 +205,8 @@ ensure_block() {
     current="$(awk -v s="$start" -v e="$end" '$0==s{f=1} f{print} $0==e{f=0}' "$file")"
     if [[ "$current" == "$new" ]]; then
       skip "блок ${tag} без изменений: $file"
-      return 1
+      SHIBUYA_CHANGED=0
+      return 0
     fi
     backup_file "$file"
     local tmp; tmp="$(mktemp)"
@@ -199,6 +220,7 @@ ensure_block() {
     printf '\n%s\n' "$new" >> "$file"
     ok "блок ${tag} добавлен: $file"
   fi
+  SHIBUYA_CHANGED=1
   return 0
 }
 

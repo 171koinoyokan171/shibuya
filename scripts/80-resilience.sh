@@ -50,7 +50,7 @@ else
   # Проводное соединение приоритетнее (metric ниже): стабильный линк и
   # предсказуемый NAT для проброса портов. WiFi — автоматический резерв.
   NP=/etc/netplan/60-shibuya.yaml
-  if write_file "$NP" 0600 <<EOF
+  write_file "$NP" 0600 <<EOF
 # shibuya: сеть для двух локаций. Ethernet приоритетнее WiFi.
 network:
   version: 2
@@ -80,7 +80,7 @@ network:
             key-management: "psk"
             password: "${PARENTS_WIFI_PSK}"
 EOF
-  then
+  if changed; then
     # netplan try сам откатится через 120 секунд, если конфиг разорвал связь.
     # netplan apply такой страховки не даёт — на удалённой машине это разница
     # между "подождать две минуты" и "ехать к родителям".

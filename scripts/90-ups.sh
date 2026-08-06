@@ -35,13 +35,13 @@ printf '%s\n' "$SCAN" | sed 's/^/    /'
 
 section "конфигурация NUT"
 # Standalone: ИБП обслуживает только эту машину, сеть не задействована.
-if write_file /etc/nut/ups.conf 0640 "root:nut" <<EOF
+write_file /etc/nut/ups.conf 0640 "root:nut" <<EOF
 # shibuya: сгенерировано nut-scanner
 maxretry = 3
 
 $(printf '%s\n' "$SCAN")
 EOF
-then ok "ups.conf записан"; fi
+if changed; then ok "ups.conf записан"; fi
 
 write_file /etc/nut/nut.conf 0640 "root:nut" <<'EOF'
 MODE=standalone

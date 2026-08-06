@@ -20,14 +20,14 @@ fi
 # Логи контейнеров без лимита — прямой путь убить SD-карту и забить диск.
 # json-file по умолчанию растёт бесконечно.
 section "конфигурация демона"
-if write_file /etc/docker/daemon.json 0644 <<'EOF'
+write_file /etc/docker/daemon.json 0644 <<'EOF'
 {
   "log-driver": "json-file",
   "log-opts": { "max-size": "10m", "max-file": "3" },
   "live-restore": true
 }
 EOF
-then
+if changed; then
   systemctl restart docker 2>/dev/null || true
   ok "демон перезапущен с лимитами логов"
 fi

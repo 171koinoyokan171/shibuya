@@ -34,7 +34,7 @@ rsync -az --delete \
   "$SRC" "${HOST}:${DST}"
 
 # Подстраховка на случай, если файл создали без +x.
-ssh "$HOST" 'chmod +x ~/shibuya/*.sh ~/shibuya/scripts/*.sh 2>/dev/null || true'
+ssh "$HOST" 'chmod +x ~/shibuya/*.sh ~/shibuya/scripts/*.sh ~/shibuya/tools/*.sh 2>/dev/null || true'
 echo "  ok синхронизировано"
 
 if [[ $RUN -eq 1 ]]; then

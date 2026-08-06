@@ -77,10 +77,12 @@ bind r source-file ~/.tmux.conf \; display "tmux.conf перечитан"
 # Статус-бар компактный: на 390 пикселях ширины лишнему места нет.
 # Температура и нагрузка — потому что это Pi под нагрузкой на SD-карте,
 # и знать, что он троттлит, полезно до того, как всё встанет.
+# Подсказка "^a d" слева — чтобы с телефона не искать по памяти, как выйти
+# не убив сессию.
 set -g status-interval 10
 set -g status-style "bg=colour236,fg=colour250"
-set -g status-left "#[bg=colour24,fg=colour255,bold] #S #[default] "
-set -g status-left-length 20
+set -g status-left "#[bg=colour24,fg=colour255,bold] #S #[default] #[fg=colour244]^a d = отцепиться#[default] "
+set -g status-left-length 40
 set -g status-right "#[fg=colour244]#(cut -d' ' -f1 /proc/loadavg) #(awk '{printf \"%.0f°\", $1/1000}' /sys/class/thermal/thermal_zone0/temp) #[fg=colour250]%H:%M "
 set -g status-right-length 40
 setw -g window-status-current-style "bg=colour24,fg=colour255"
@@ -97,24 +99,55 @@ EOF
 # осознанно проверяем $TMUX (не вложиться в самих себя) и интерактивность
 # (иначе сломается scp/rsync/git-over-ssh).
 section "авто-attach в tmux"
-ATTACH_SNIPPET='
-# >>> shibuya:tmux-autoattach >>>
-# Вход по SSH/mosh -> сразу в постоянную сессию. Работа переживает разрыв связи.
+
+# Логика живёт в ОДНОМ файле, который подключают оба шелла. Раньше сниппет
+# копировался в .bashrc и .zshrc, и правка переставала доезжать до тех rc,
+# где блок уже был — правильная версия оказывалась только в одном из них.
+write_file /etc/shibuya/shell-tmux.sh 0644 <<'EOF' || true
+# shibuya: поведение tmux при входе по SSH/mosh. Подключается из ~/.bashrc и ~/.zshrc.
+
+# Вход по SSH/mosh -> сразу в постоянную сессию. Работа переживает разрыв связи,
+# перезагрузку телефона и разряд батареи.
+# Намеренно без exec: если tmux не стартует, exec уронил бы соединение и мы бы
+# потеряли доступ к машине.
 if [ -z "${TMUX:-}" ] && [ -n "${SSH_CONNECTION:-}" ] && [ -t 1 ] && command -v tmux >/dev/null 2>&1; then
     tmux new-session -A -s main
 fi
-# <<< shibuya:tmux-autoattach <<<'
+
+# Защита от главной ошибки при работе с телефона: набрать exit и тем самым
+# уничтожить сессию вместе со всей работой. В последнем окне exit отцепляет
+# (как ^a d), во всех остальных случаях работает как обычно.
+if [ -n "${TMUX:-}" ]; then
+    if [ -n "${ZSH_VERSION:-}" ]; then setopt IGNORE_EOF; else set -o ignoreeof; fi
+    exit() {
+        if [ "$(tmux list-windows | wc -l)" -eq 1 ] && [ "$(tmux list-panes | wc -l)" -eq 1 ]; then
+            echo "Это последнее окно — отцепляюсь, сессия остаётся жить на Pi."
+            echo "Закрыть по-настоящему: builtin exit  (или tmux kill-session)"
+            tmux detach-client
+        else
+            builtin exit "$@"
+        fi
+    }
+fi
+EOF
+
+SOURCE_LINE='[ -f /etc/shibuya/shell-tmux.sh ] && . /etc/shibuya/shell-tmux.sh'
 
 for rc in .bashrc .zshrc; do
   f="${USER_HOME}/${rc}"
   touch "$f"; chown "${USER_NAME}:${USER_NAME}" "$f"
+  # Вычищаем старые inline-блоки, если остались с прошлых версий.
   if grep -q 'shibuya:tmux-autoattach' "$f"; then
-    skip "авто-attach уже в ${rc}"
-  else
     backup_file "$f"
-    printf '%s\n' "$ATTACH_SNIPPET" >> "$f"
-    ok "авто-attach добавлен в ${rc}"
+    tmp="$(mktemp)"
+    awk '/# >>> shibuya:tmux-autoattach >>>/{f=1} !f{print} /# <<< shibuya:tmux-autoattach <<</{f=0}' "$f" > "$tmp"
+    cat "$tmp" > "$f"; rm -f "$tmp"
+    chown "${USER_NAME}:${USER_NAME}" "$f"
+    ok "старый inline-блок вычищен из ${rc}"
   fi
+  ensure_line "$f" "$SOURCE_LINE" 'shell-tmux.sh' \
+    && ok "подключён shell-tmux.sh в ${rc}" || skip "shell-tmux.sh уже подключён в ${rc}"
+  chown "${USER_NAME}:${USER_NAME}" "$f"
 done
 
 # ------------------------------------------------------------- zsh ---------
@@ -175,11 +208,9 @@ command -v fdfind >/dev/null && alias fd='fdfind'
 export EDITOR=vim
 export PATH="$HOME/.local/bin:$PATH"
 
-# >>> shibuya:tmux-autoattach >>>
-if [ -z "${TMUX:-}" ] && [ -n "${SSH_CONNECTION:-}" ] && [ -t 1 ] && command -v tmux >/dev/null 2>&1; then
-    tmux new-session -A -s main
-fi
-# <<< shibuya:tmux-autoattach <<<
+# Поведение tmux (авто-attach + защита от exit) — в общем файле,
+# чтобы одна и та же логика не расходилась между .bashrc и .zshrc.
+[ -f /etc/shibuya/shell-tmux.sh ] && . /etc/shibuya/shell-tmux.sh
 EOF
 
 if [[ "$(getent passwd "$USER_NAME" | cut -d: -f7)" == "/usr/bin/zsh" ]]; then

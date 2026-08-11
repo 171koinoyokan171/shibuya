@@ -35,6 +35,12 @@ printf '%s\n' "$SCAN" | sed 's/^/    /'
 
 section "конфигурация NUT"
 # Standalone: ИБП обслуживает только эту машину, сеть не задействована.
+NUT_PASS_FILE="${SHIBUYA_ETC}/nut-upsmon.pass"
+if [[ ! -f "$NUT_PASS_FILE" ]]; then
+  install -m 0600 -o root -g root /dev/null "$NUT_PASS_FILE"
+  head -c 24 /dev/urandom | base64 > "$NUT_PASS_FILE"
+fi
+NUT_PASS="$(cat "$NUT_PASS_FILE")"
 write_file /etc/nut/ups.conf 0640 "root:nut" <<EOF
 # shibuya: сгенерировано nut-scanner
 maxretry = 3
@@ -47,9 +53,9 @@ write_file /etc/nut/nut.conf 0640 "root:nut" <<'EOF'
 MODE=standalone
 EOF
 
-write_file /etc/nut/upsd.users 0640 "root:nut" <<'EOF'
+write_file /etc/nut/upsd.users 0640 "root:nut" <<EOF
 [upsmon]
-    password = shibuya-local
+    password = ${NUT_PASS}
     upsmon primary
 EOF
 
@@ -59,7 +65,7 @@ UPSNAME="${UPSNAME:-ups}"
 write_file /etc/nut/upsmon.conf 0640 "root:nut" <<EOF
 # shibuya: выключаться заранее, а не в момент полного разряда — при жёстком
 # обрыве питания на SD-карте легко получить битую файловую систему.
-MONITOR ${UPSNAME}@localhost 1 upsmon shibuya-local primary
+MONITOR ${UPSNAME}@localhost 1 upsmon ${NUT_PASS} primary
 MINSUPPLIES 1
 SHUTDOWNCMD "/sbin/shutdown -h +0"
 POLLFREQ 5

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Раскатка: синхронизирует ~/shibuya на Pi и (опционально) запускает bootstrap.
+# Deploy: syncs ~/shibuya to the Pi and (optionally) runs bootstrap.
 #
-# Запускать НА МАКЕ:
-#   ./deploy.sh                    # только синхронизировать файлы
-#   ./deploy.sh --run              # синхронизировать и прогнать фазу A
-#   ./deploy.sh --run --only 20    # синхронизировать и прогнать один скрипт
-#   SHIBUYA_HOST=shibuya ./deploy.sh --run   # через другой хост/алиас
+# Run this ON THE MAC:
+#   ./deploy.sh                    # sync files only
+#   ./deploy.sh --run              # sync and run phase A
+#   ./deploy.sh --run --only 20    # sync and run a single script
+#   SHIBUYA_HOST=shibuya ./deploy.sh --run   # via a different host/alias
 #
-# Хост по умолчанию — shibuya.local (mDNS, работает пока Pi дома).
-# После переезда: SHIBUYA_HOST=shibuya (Tailscale MagicDNS) или shibuya-wan.
+# The default host is shibuya.local (mDNS, works while the Pi is at home).
+# Once it moves: SHIBUYA_HOST=shibuya (Tailscale MagicDNS) or shibuya-wan.
 
 set -Eeuo pipefail
 
@@ -25,20 +25,20 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo "==> sync ${SRC} -> ${HOST}:~/${DST}"
-# -a сохраняет права как есть, включая исполняемый бит на скриптах.
-# --chmod намеренно не используем: rsync в macOS его не поддерживает.
+# -a preserves permissions as they are, including the executable bit on scripts.
+# --chmod is deliberately not used: rsync on macOS does not support it.
 rsync -az --delete \
   --exclude '.git/' \
   --exclude '*.swp' \
   --exclude 'secrets/' \
   "$SRC" "${HOST}:${DST}"
 
-# Подстраховка на случай, если файл создали без +x.
+# Safety net in case a file was created without +x.
 ssh "$HOST" 'chmod +x ~/shibuya/*.sh ~/shibuya/scripts/*.sh ~/shibuya/tools/*.sh 2>/dev/null || true'
-echo "  ok синхронизировано"
+echo "  ok synced"
 
 if [[ $RUN -eq 1 ]]; then
-  echo "==> запуск bootstrap на ${HOST}"
-  # -t нужен, чтобы sudo и интерактивные подтверждения работали.
+  echo "==> running bootstrap on ${HOST}"
+  # -t is needed so sudo and interactive prompts work.
   ssh -t "$HOST" "sudo ~/shibuya/bootstrap.sh ${PASSTHRU[*]:-}"
 fi

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Основной канал доступа: Tailscale (работает через NAT, роутер родителей не трогаем).
+# The primary access channel: Tailscale (works through NAT, my parents' router stays untouched).
 set -Eeuo pipefail
 source "${SHIBUYA_ROOT:?}/lib/common.sh"
 require_root
@@ -7,29 +7,29 @@ ensure_dirs
 
 HOSTNAME_TS="${SHIBUYA_TS_HOSTNAME:-shibuya}"
 
-# --------------------------------------------------------- репозиторий -----
-# Tailscale отдаёт ключ уже в бинарном виде (noarmor), поэтому НЕ прогоняем
-# его через gpg --dearmor — второй раз он не разбирается.
-section "репозиторий tailscale"
+# --------------------------------------------------------- repository ------
+# Tailscale serves the key already in binary form (noarmor), so it is NOT run
+# through gpg --dearmor — it does not parse a second time.
+section "tailscale repository"
 CODENAME="$(. /etc/os-release && echo "$VERSION_CODENAME")"
 KEYRING=/usr/share/keyrings/tailscale-archive-keyring.gpg
 LIST=/etc/apt/sources.list.d/tailscale.list
 
 if [[ -s "$KEYRING" ]]; then
-  skip "ключ tailscale уже на месте"
+  skip "tailscale key already in place"
 else
   curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${CODENAME}.noarmor.gpg" -o "$KEYRING"
   chmod 0644 "$KEYRING"
-  ok "ключ tailscale установлен"
+  ok "tailscale key installed"
   _apt_updated=0
 fi
 
 REPO_LINE="deb [signed-by=${KEYRING}] https://pkgs.tailscale.com/stable/ubuntu ${CODENAME} main"
 if [[ -f "$LIST" ]] && grep -qF "$REPO_LINE" "$LIST"; then
-  skip "репозиторий tailscale уже настроен"
+  skip "tailscale repository already configured"
 else
   printf '%s\n' "$REPO_LINE" > "$LIST"
-  ok "репозиторий tailscale добавлен"
+  ok "tailscale repository added"
   _apt_updated=0
 fi
 
@@ -37,30 +37,30 @@ apt_install tailscale
 enable_now tailscaled.service
 
 # ------------------------------------------------------------ ufw ---------
-# Правило на tailscale0 могло не примениться в 20-hardening, если интерфейса
-# тогда ещё не существовало. Добавляем сейчас, когда он появился.
+# The tailscale0 rule may have been skipped in 20-hardening if the interface
+# did not exist yet. Add it now that it does.
 if have ufw && contains "$(ufw status 2>/dev/null || true)" 'Status: active'; then
   if contains "$(ufw status)" 'tailscale0'; then
-    skip "правило ufw для tailscale0 уже есть"
+    skip "ufw rule for tailscale0 already present"
   else
     ufw allow in on tailscale0 >/dev/null
-    ok "ufw: разрешён весь входящий трафик из тайлнета"
+    ok "ufw: all inbound tailnet traffic allowed"
   fi
 fi
 
-# ----------------------------------------------------------- логин --------
-section "авторизация"
+# ----------------------------------------------------------- login --------
+section "authentication"
 TS_STATUS="$(tailscale status --json 2>/dev/null || echo '{}')"
 BACKEND="$(printf '%s' "$TS_STATUS" | jq -r '.BackendState // "Unknown"')"
 
 if [[ "$BACKEND" == "Running" ]]; then
   TS_IP="$(tailscale ip -4 2>/dev/null | head -1)"
   TS_NAME="$(printf '%s' "$TS_STATUS" | jq -r '.Self.DNSName // ""' | sed 's/\.$//')"
-  ok "уже в тайлнете: ${TS_IP} (${TS_NAME})"
+  ok "already on the tailnet: ${TS_IP} (${TS_NAME})"
 else
-  log "нода не авторизована — запускаю логин"
-  # tailscale up блокируется до подтверждения в браузере. Запускаем в фоне,
-  # вылавливаем ссылку и показываем её — иначе bootstrap встанет намертво.
+  log "node not authenticated — starting login"
+  # tailscale up blocks until confirmed in a browser. Run it in the background,
+  # catch the URL and print it — otherwise bootstrap hangs forever.
   LOGFILE=/tmp/tailscale-up.log
   rm -f "$LOGFILE"
   setsid nohup tailscale up --hostname="${HOSTNAME_TS}" --accept-dns=true \
@@ -71,33 +71,33 @@ else
   done
   URL="$(grep -oE 'https://login\.tailscale\.com[^ ]*' "$LOGFILE" 2>/dev/null | head -1 || true)"
   if [[ -n "$URL" ]]; then
-    warn "ТРЕБУЕТСЯ РУЧНОЙ ШАГ — открой ссылку в браузере:"
+    warn "MANUAL STEP REQUIRED — open this URL in a browser:"
     echo
     echo "    $URL"
     echo
-    warn "после подтверждения нода появится в тайлнете как '${HOSTNAME_TS}'"
+    warn "once confirmed the node shows up on the tailnet as '${HOSTNAME_TS}'"
   else
-    warn "не удалось выловить ссылку; запусти вручную:"
+    warn "could not catch the URL; run it by hand:"
     warn "    sudo tailscale up --hostname=${HOSTNAME_TS}"
   fi
 fi
 
-# Ключ ноды по умолчанию протухает через 180 дней, после чего машина молча
-# выпадает из тайлнета — для сервера, к которому нельзя подъехать, это самый
-# обидный способ потерять доступ. Предупреждаем ТОЛЬКО если expiry реально
-# включён: предупреждение, которое печатается всегда, перестают читать.
+# A node key expires after 180 days by default, after which the machine silently
+# drops off the tailnet — for a server you cannot reach that is the most
+# annoying way to lose access. The warning fires ONLY when expiry is actually
+# enabled: a warning that always prints stops being read.
 EXPIRY="$(tailscale status --json 2>/dev/null | jq -r '.Self.KeyExpiry // "none"')"
 echo
 case "$EXPIRY" in
   none|null|"")
-    ok "key expiry отключён — нода не выпадет из тайлнета"
+    ok "key expiry disabled — the node will not drop off the tailnet"
     ;;
   *)
-    warn "KEY EXPIRY ВКЛЮЧЁН — до ${EXPIRY}"
-    warn "После этой даты нода молча выпадет из тайлнета и доступ пропадёт."
-    warn "Отключить один раз: https://login.tailscale.com/admin/machines"
-    warn "  -> нода '${HOSTNAME_TS}' -> ... -> Disable key expiry"
+    warn "KEY EXPIRY IS ON — until ${EXPIRY}"
+    warn "After that date the node silently leaves the tailnet and access is gone."
+    warn "Disable it once: https://login.tailscale.com/admin/machines"
+    warn "  -> node '${HOSTNAME_TS}' -> ... -> Disable key expiry"
     ;;
 esac
 
-ok "30-tailscale готов"
+ok "30-tailscale done"

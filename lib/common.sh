@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Общие хелперы для всех скриптов shibuya.
-# Подключается через: source "$(dirname "$0")/../lib/common.sh"
+# Shared helpers for every shibuya script.
+# Sourced via: source "$(dirname "$0")/../lib/common.sh"
 #
-# Главный принцип: каждая функция идемпотентна и ничего не делает, если
-# нужное состояние уже достигнуто. Прогон bootstrap.sh второй раз должен
-# быть безопасным и почти бесшумным.
+# Core principle: every function is idempotent and does nothing when the
+# desired state is already in place. Running bootstrap.sh a second time must
+# be safe and almost silent.
 
 set -Eeuo pipefail
 
@@ -12,7 +12,7 @@ SHIBUYA_ETC="/etc/shibuya"
 SHIBUYA_BACKUPS="${SHIBUYA_ETC}/backups"
 SHIBUYA_STATE="${SHIBUYA_ETC}/state"
 
-# ---------------------------------------------------------------- вывод ----
+# --------------------------------------------------------------- output ----
 
 _c_reset=$'\033[0m'; _c_blue=$'\033[34m'; _c_green=$'\033[32m'
 _c_yellow=$'\033[33m'; _c_red=$'\033[31m'; _c_dim=$'\033[2m'
@@ -23,30 +23,30 @@ skip()  { printf '%s  --%s %s\n' "$_c_dim"    "$_c_reset" "$*"; }
 warn()  { printf '%s  !!%s %s\n' "$_c_yellow" "$_c_reset" "$*" >&2; }
 die()   { printf '%sFAIL%s %s\n' "$_c_red"    "$_c_reset" "$*" >&2; exit 1; }
 
-# Печатает заголовок секции — чтобы в длинном выводе bootstrap было видно,
-# какой скрипт сейчас работает.
+# Prints a section header so that in bootstrap's long output it is clear
+# which script is currently running.
 section() {
   printf '\n%s%s%s\n' "$_c_blue" "────── $* ──────" "$_c_reset"
 }
 
 on_error() {
   local rc=$? line=${1:-?}
-  printf '%sFAIL%s строка %s, код %s\n' "$_c_red" "$_c_reset" "$line" "$rc" >&2
+  printf '%sFAIL%s line %s, code %s\n' "$_c_red" "$_c_reset" "$line" "$rc" >&2
 }
 trap 'on_error $LINENO' ERR
 
 # ---------------------------------------------------------------- guards ---
 
 require_root() {
-  [[ $EUID -eq 0 ]] || die "нужен root: запускай через sudo"
+  [[ $EUID -eq 0 ]] || die "root required: run this with sudo"
 }
 
 require_not_root() {
-  [[ $EUID -ne 0 ]] || die "этот скрипт должен работать от обычного пользователя, не от root"
+  [[ $EUID -ne 0 ]] || die "this script must run as a normal user, not as root"
 }
 
-# Пользователь, для которого настраиваем окружение. Скрипты запускаются
-# через sudo, поэтому $USER там root — берём реального через SUDO_USER.
+# The user whose environment we are setting up. Scripts run under sudo, so
+# $USER is root there — take the real one from SUDO_USER.
 target_user() {
   echo "${SUDO_USER:-${SHIBUYA_USER:-$(id -un)}}"
 }
@@ -55,7 +55,7 @@ target_home() {
   getent passwd "$(target_user)" | cut -d: -f6
 }
 
-# Выполнить команду от имени целевого пользователя (а не от root).
+# Run a command as the target user (not as root).
 as_user() {
   local u; u="$(target_user)"
   if [[ "$(id -un)" == "$u" ]]; then
@@ -81,7 +81,7 @@ apt_update_once() {
   fi
 }
 
-# Ставит пакеты, которых ещё нет. Возвращает 0 всегда, если всё встало.
+# Installs packages that are not present yet. Always returns 0 when they are in place.
 apt_install() {
   local missing=()
   local p
@@ -90,33 +90,33 @@ apt_install() {
       || missing+=("$p")
   done
   if [[ ${#missing[@]} -eq 0 ]]; then
-    skip "пакеты уже стоят: $*"
+    skip "packages already installed: $*"
     return 0
   fi
   apt_update_once
   log "apt install: ${missing[*]}"
   DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${missing[@]}"
-  ok "установлено: ${missing[*]}"
+  ok "installed: ${missing[*]}"
 }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# Проверка "вывод содержит шаблон" БЕЗ пайплайна.
+# "output contains pattern" WITHOUT a pipeline.
 #
-# Так делать нельзя:  cmd | grep -q pat
-# Потому что grep выходит по первому совпадению, cmd ловит SIGPIPE и с
-# `set -o pipefail` весь пайплайн становится неуспешным — то есть проверка
-# врёт ровно тогда, когда совпадение НАЙДЕНО. Ловится тяжело: скрипт ругается
-# на корректно применённые настройки.
+# Do not do this:  cmd | grep -q pat
+# grep exits on the first match, cmd catches SIGPIPE and with
+# `set -o pipefail` the whole pipeline fails — meaning the check lies exactly
+# when a match IS found. Painful to debug: the script complains about settings
+# that were applied correctly.
 contains() {
   local haystack="$1" pattern="$2"
   [[ "$haystack" =~ $pattern ]]
 }
 
-# ---------------------------------------------------------------- файлы ----
+# ---------------------------------------------------------------- files ----
 
-# Копия системного файла перед первой правкой. Копия делается ОДИН раз —
-# чтобы повторный прогон не затёр оригинал уже изменённой версией.
+# A copy of a system file before the first edit. Taken ONCE, so that a repeat
+# run does not overwrite the original with an already-modified version.
 backup_file() {
   local src="$1"
   [[ -f "$src" ]] || return 0
@@ -124,28 +124,28 @@ backup_file() {
   local dst="${SHIBUYA_BACKUPS}/${src//\//_}.orig"
   if [[ ! -f "$dst" ]]; then
     cp -a "$src" "$dst"
-    ok "бэкап оригинала: $dst"
+    ok "original backed up: $dst"
   fi
 }
 
-# Признак "последняя write_file/ensure_line/ensure_block что-то изменила".
+# Flag: "the last write_file/ensure_line/ensure_block changed something".
 #
-# Раньше эти функции сообщали об этом кодом возврата 1 = "без изменений".
-# Под `set -e` это оказалось миной: любой вызов, не обёрнутый в `if` или
-# `|| true`, ронял скрипт на ВТОРОМ прогоне — то есть ровно тогда, когда
-# идемпотентность должна была работать. Забыть обёртку слишком легко
-# (забыл в 12 местах из 14). Теперь функции всегда возвращают 0, а признак
-# изменения читается через changed().
+# These functions used to signal that with exit code 1 = "no changes".
+# Under `set -e` that was a landmine: any call not wrapped in `if` or
+# `|| true` killed the script on the SECOND run — exactly when idempotency
+# was supposed to pay off. Forgetting the wrapper is far too easy
+# (I forgot it in 12 places out of 14). Now they always return 0 and the change
+# flag is read through changed().
 SHIBUYA_CHANGED=0
 
-# Изменил ли последний вызов write_file/ensure_line/ensure_block файл?
+# Did the last write_file/ensure_line/ensure_block actually change the file?
 #   write_file /etc/foo.conf <<EOF ... EOF
 #   if changed; then systemctl restart foo; fi
 changed() { [[ "${SHIBUYA_CHANGED:-0}" == "1" ]]; }
 
-# Записать файл с нужным содержимым и правами. Если содержимое уже такое —
-# ничего не делает (чтобы не дёргать лишние рестарты). Всегда возвращает 0;
-# факт изменения — через changed().
+# Write a file with the given content and mode. If the content already matches,
+# it does nothing (to avoid pointless restarts). Always returns 0;
+# use changed() to detect a change.
 write_file() {
   local path="$1" mode="${2:-0644}" owner="${3:-root:root}"
   local tmp; tmp="$(mktemp)"
@@ -153,19 +153,19 @@ write_file() {
   if [[ -f "$path" ]] && cmp -s "$tmp" "$path"; then
     rm -f "$tmp"
     chmod "$mode" "$path"; chown "$owner" "$path"
-    skip "без изменений: $path"
+    skip "unchanged: $path"
     SHIBUYA_CHANGED=0
     return 0
   fi
   backup_file "$path"
   install -D -m "$mode" -o "${owner%%:*}" -g "${owner##*:}" "$tmp" "$path"
   rm -f "$tmp"
-  ok "записан: $path"
+  ok "written: $path"
   SHIBUYA_CHANGED=1
   return 0
 }
 
-# Файл в домашнем каталоге целевого пользователя.
+# A file in the target user's home directory.
 write_user_file() {
   local rel="$1" mode="${2:-0644}"
   local home; home="$(target_home)"
@@ -173,25 +173,25 @@ write_user_file() {
   write_file "${home}/${rel}" "$mode" "${u}:${u}"
 }
 
-# Гарантирует наличие строки в файле (по якорю для поиска дубля).
-# Всегда возвращает 0; факт добавления — через changed().
+# Ensures a line exists in a file (an anchor is used to detect duplicates).
+# Always returns 0; use changed() to detect an addition.
 ensure_line() {
   local file="$1" line="$2" match="${3:-$2}"
   touch "$file"
   if grep -qF -- "$match" "$file" 2>/dev/null; then
-    skip "строка уже есть в $file"
+    skip "line already in $file"
     SHIBUYA_CHANGED=0
     return 0
   fi
   backup_file "$file"
   printf '%s\n' "$line" >> "$file"
-  ok "добавлено в $file: $line"
+  ok "added to $file: $line"
   SHIBUYA_CHANGED=1
   return 0
 }
 
-# Управляемый блок в чужом конфиге — по образцу вашей work-isolation схемы
-# в ~/.ssh/config. Позволяет переписывать свой кусок, не трогая остальное.
+# A managed block inside someone else's config — modelled on the work-isolation
+# setup in ~/.ssh/config. Lets us rewrite our own chunk without touching the rest.
 ensure_block() {
   local file="$1" tag="$2"
   local body; body="$(cat)"
@@ -204,7 +204,7 @@ ensure_block() {
     local current
     current="$(awk -v s="$start" -v e="$end" '$0==s{f=1} f{print} $0==e{f=0}' "$file")"
     if [[ "$current" == "$new" ]]; then
-      skip "блок ${tag} без изменений: $file"
+      skip "block ${tag} unchanged: $file"
       SHIBUYA_CHANGED=0
       return 0
     fi
@@ -214,11 +214,11 @@ ensure_block() {
     printf '%s\n' "$new" >> "$tmp"
     cat "$tmp" > "$file"
     rm -f "$tmp"
-    ok "блок ${tag} обновлён: $file"
+    ok "block ${tag} updated: $file"
   else
     backup_file "$file"
     printf '\n%s\n' "$new" >> "$file"
-    ok "блок ${tag} добавлен: $file"
+    ok "block ${tag} added: $file"
   fi
   SHIBUYA_CHANGED=1
   return 0
@@ -233,7 +233,7 @@ systemd_reload_if_needed() {
 enable_now() {
   local unit="$1"
   if systemctl is-enabled --quiet "$unit" 2>/dev/null && systemctl is-active --quiet "$unit" 2>/dev/null; then
-    skip "$unit уже enabled+active"
+    skip "$unit already enabled+active"
     return 0
   fi
   systemctl enable --now "$unit"
@@ -242,8 +242,8 @@ enable_now() {
 
 # ------------------------------------------------------------ apt repos ----
 
-# Добавляет сторонний apt-репозиторий с ключом в правильном (не deprecated)
-# формате: ключ в /etc/apt/keyrings, signed-by в .list.
+# Adds a third-party apt repository with the key in the correct (non-deprecated)
+# format: key in /etc/apt/keyrings, signed-by in the .list file.
 add_apt_repo() {
   local name="$1" key_url="$2" repo_line="$3"
   local keyring="/etc/apt/keyrings/${name}.gpg"
@@ -252,7 +252,7 @@ add_apt_repo() {
   install -d -m 0755 /etc/apt/keyrings
 
   if [[ ! -s "$keyring" ]]; then
-    log "ключ репозитория ${name}"
+    log "repository key ${name}"
     curl -fsSL "$key_url" | gpg --dearmor -o "$keyring"
     chmod 0644 "$keyring"
     _apt_updated=0
@@ -260,17 +260,17 @@ add_apt_repo() {
 
   local line="deb [arch=$(dpkg --print-architecture) signed-by=${keyring}] ${repo_line}"
   if [[ -f "$list" ]] && grep -qF "$line" "$list"; then
-    skip "репозиторий ${name} уже настроен"
+    skip "repository ${name} already configured"
   else
     printf '%s\n' "$line" > "$list"
-    ok "репозиторий ${name} добавлен"
+    ok "repository ${name} added"
     _apt_updated=0
   fi
 }
 
-# ------------------------------------------------------------ маркеры ------
+# ------------------------------------------------------------- markers ------
 
-# Для шагов, которые нельзя проверить дешёвой командой (например, разовые
-# миграции) — файл-маркер в /etc/shibuya/state.
+# For steps that cannot be checked with a cheap command (one-off migrations,
+# for example) — a marker file in /etc/shibuya/state.
 step_done() { ensure_dirs; [[ -f "${SHIBUYA_STATE}/$1" ]]; }
 mark_done() { ensure_dirs; touch "${SHIBUYA_STATE}/$1"; }

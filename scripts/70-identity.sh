@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Доступы и изоляция контекстов: SSH-ключи Pi, ~/.ssh/config, git fail-closed, direnv.
+# Access and context isolation: the Pi's SSH keys, ~/.ssh/config, git fail-closed, direnv.
 #
-# Ключ клиентского контекста pt по умолчанию НЕ создаётся. Включить осознанно:
+# The pt client-context key is NOT created by default. Enable it deliberately:
 #   sudo SHIBUYA_WITH_PT=1 ~/shibuya/bootstrap.sh --only 70
 set -Eeuo pipefail
 source "${SHIBUYA_ROOT:?}/lib/common.sh"
@@ -18,18 +18,18 @@ GIT_EMAIL="${SHIBUYA_GIT_EMAIL:-dmitriy.kaluzhniy@skelar.tech}"
 
 install -d -m 0700 -o "$USER_NAME" -g "$USER_NAME" "$SSH_DIR"
 
-# ------------------------------------------------------------- ключи ------
-# Приватные ключи с Мака НЕ копируем. Отдельные ключи для Pi можно отозвать
-# независимо: если машину у родителей скомпрометируют, рабочий ноут не задет.
-section "SSH-ключи"
+# -------------------------------------------------------------- keys ------
+# Private keys are NOT copied from the Mac. Separate keys for the Pi can be
+# revoked independently: if the box at my parents' is compromised, the work laptop is untouched.
+section "SSH keys"
 gen_key() {
   local name="$1" comment="$2"
   local path="${SSH_DIR}/${name}"
   if [[ -f "$path" ]]; then
-    skip "ключ ${name} уже есть"
+    skip "key ${name} already exists"
   else
     as_user ssh-keygen -t ed25519 -N '' -f "$path" -C "$comment" >/dev/null
-    ok "создан ключ ${name}"
+    ok "key ${name} created"
   fi
 }
 
@@ -38,12 +38,12 @@ gen_key id_gh  "shibuya-pi:personal"
 if [[ "$WITH_PT" == "1" ]]; then
   gen_key id_pt "shibuya-pi:pt"
 else
-  skip "ключ pt не создаётся (SHIBUYA_WITH_PT=1, если нужен)"
+  skip "pt key not created (set SHIBUYA_WITH_PT=1 if you need it)"
 fi
 
 # --------------------------------------------------------- ssh config -----
-# Повторяет схему изоляции с Мака. UseKeychain намеренно нет — это
-# macOS-специфичная директива, на Linux от неё sshd/ssh ругается.
+# Mirrors the isolation scheme from the Mac. UseKeychain is deliberately absent —
+# it is a macOS-specific directive and ssh complains about it on Linux.
 section "~/.ssh/config"
 PT_BLOCK=""
 if [[ "$WITH_PT" == "1" ]]; then
@@ -83,9 +83,9 @@ EOF
 chown "${USER_NAME}:${USER_NAME}" "$CFG"; chmod 0600 "$CFG"
 
 # ---------------------------------------------------------- gitconfig -----
-# Fail-closed как на Маке: useconfigonly=true означает, что коммит без явно
-# заданной identity просто не пройдёт. Это защита от коммита в рабочий репо
-# от чужого имени — особенно ценно на машине, где смешаны контексты.
+# Fail-closed as on the Mac: useconfigonly=true means a commit without an
+# explicitly set identity simply will not go through. It guards against committing
+# to a work repo under the wrong name — especially valuable where contexts mix.
 section "git identity"
 write_file "${USER_HOME}/.gitconfig-skelar" 0644 "${USER_NAME}:${USER_NAME}" <<EOF || true
 [user]
@@ -99,8 +99,8 @@ write_file "${USER_HOME}/.gitconfig" 0644 "${USER_NAME}:${USER_NAME}" <<EOF || t
 [core]
 	excludesfile = ${USER_HOME}/.gitignore_global
 [user]
-	# Без явной identity коммит не пройдёт — вместо тихого коммита не от того
-	# лица git выдаст ошибку. Identity подставляется includeIf-ом ниже.
+	# Without an explicit identity a commit fails — instead of quietly committing
+	# as the wrong person, git errors out. The identity is supplied by includeIf below.
 	useConfigOnly = true
 [init]
 	defaultBranch = main
@@ -117,21 +117,21 @@ write_file "${USER_HOME}/.gitignore_global" 0644 "${USER_NAME}:${USER_NAME}" <<'
 .envrc.local
 EOF
 
-# ------------------------------------------------------- рабочий каталог --
-# Паритет с Маком: ~/lvn с тем же .envrc, чтобы includeIf и WORK_CONTEXT
-# срабатывали одинаково. Репозитории клонируем по мере надобности — все 40
-# на SD-карту тащить незачем.
+# ------------------------------------------------------- work directory ---
+# Parity with the Mac: ~/lvn with the same .envrc so includeIf and WORK_CONTEXT
+# behave identically. Repositories are cloned on demand — dragging all 40 onto
+# an SD card makes no sense.
 section "~/lvn"
 install -d -m 0755 -o "$USER_NAME" -g "$USER_NAME" "${USER_HOME}/lvn"
 write_file "${USER_HOME}/lvn/.envrc" 0644 "${USER_NAME}:${USER_NAME}" <<'EOF' || true
 export WORK_CONTEXT="skelar"
 EOF
 as_user direnv allow "${USER_HOME}/lvn" 2>/dev/null \
-  && ok "direnv allow для ~/lvn" \
-  || warn "direnv allow не отработал — выполни вручную в ~/lvn"
+  && ok "direnv allow for ~/lvn" \
+  || warn "direnv allow failed — run it by hand in ~/lvn"
 
-# ------------------------------------------------------------ вывод -------
-section "публичные ключи — добавить в GitHub"
+# ---------------------------------------------------------- output --------
+section "public keys — add these to GitHub"
 echo
 for k in id_lvn id_gh id_pt; do
   [[ -f "${SSH_DIR}/${k}.pub" ]] || continue
@@ -139,8 +139,8 @@ for k in id_lvn id_gh id_pt; do
   echo "    $(cat "${SSH_DIR}/${k}.pub")"
 done
 echo
-echo "  После 'gh auth login' можно добавить одной командой:"
+echo "  After 'gh auth login' they can be added with a single command:"
 echo "    gh ssh-key add ~/.ssh/id_lvn.pub --title 'shibuya-pi (skelar)'"
 echo "    gh ssh-key add ~/.ssh/id_gh.pub  --title 'shibuya-pi (personal)'"
 
-ok "70-identity готов"
+ok "70-identity done"

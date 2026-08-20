@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Достаёт chat_id у свежесозданного бота и прописывает всё в move.env.
+# Fetches the chat_id from a freshly created bot and writes everything into move.env.
 #
-# Что нужно сделать ДО запуска:
-#   1. У @BotFather создать бота (/newbot) — он выдаст токен вида
-#      8123456789:AAH...  Скопировать его.
-#   2. Открыть своего бота в Telegram и нажать START (или написать ему
-#      любое сообщение). Без этого бот не имеет права вам писать, и
-#      chat_id взяться неоткуда — это самый частый ступор на этом шаге.
+# What to do BEFORE running this:
+#   1. Create a bot with @BotFather (/newbot) — it hands you a token like
+#      8123456789:AAH...  Copy it.
+#   2. Open your bot in Telegram and press START (or send it any message).
+#      Without that the bot is not allowed to message you and there is
+#      nowhere for the chat_id to come from — the usual sticking point here.
 #
-# Запуск на Pi:
+# Run on the Pi:
 #   ~/shibuya/tools/telegram-setup.sh
-#   ~/shibuya/tools/telegram-setup.sh 8123456789:AAH...   # токен аргументом
+#   ~/shibuya/tools/telegram-setup.sh 8123456789:AAH...   # token as an argument
 
 set -Eeuo pipefail
 
@@ -19,45 +19,45 @@ _g=$'\033[32m'; _r=$'\033[31m'; _y=$'\033[33m'; _0=$'\033[0m'
 
 TOKEN="${1:-}"
 if [[ -z "$TOKEN" ]]; then
-  # -r чтобы бэкслеши в токене не съедались, хотя их там и не бывает
-  read -rp "Токен бота от @BotFather: " TOKEN
+  # -r so backslashes in the token are not eaten, even though there are none
+  read -rp "Bot token from @BotFather: " TOKEN
 fi
 TOKEN="${TOKEN// /}"
 
 if [[ ! "$TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
-  printf '%sНе похоже на токен.%s Ожидается вид 8123456789:AAH...\n' "$_r" "$_0" >&2
+  printf '%sThat does not look like a token.%s Expected 8123456789:AAH...\n' "$_r" "$_0" >&2
   exit 1
 fi
 
 API="https://api.telegram.org/bot${TOKEN}"
 
-# Проверяем сам токен раньше, чем ищем chat_id — иначе непонятно, что именно
-# не так: токен или отсутствие сообщений.
-echo "Проверяю токен..."
+# The token is validated before looking for a chat_id — otherwise it is unclear
+# what went wrong: the token or the missing messages.
+echo "Checking the token..."
 ME="$(curl -fsS --max-time 15 "${API}/getMe" || true)"
 if [[ "$(printf '%s' "$ME" | jq -r '.ok // false')" != "true" ]]; then
-  printf '%sТокен не принят Telegram.%s Проверь, что скопирован целиком.\n' "$_r" "$_0" >&2
+  printf '%sTelegram rejected the token.%s Check that you copied all of it.\n' "$_r" "$_0" >&2
   exit 1
 fi
 BOTNAME="$(printf '%s' "$ME" | jq -r '.result.username')"
-printf '%s  ok%s бот @%s\n' "$_g" "$_0" "$BOTNAME"
+printf '%s  ok%s bot @%s\n' "$_g" "$_0" "$BOTNAME"
 
-echo "Ищу твой chat_id..."
+echo "Looking for your chat_id..."
 CHAT_ID=""
 for attempt in $(seq 1 20); do
   UPD="$(curl -fsS --max-time 15 "${API}/getUpdates" || true)"
   CHAT_ID="$(printf '%s' "$UPD" | jq -r '[.result[]?.message.chat.id] | last // empty')"
   [[ -n "$CHAT_ID" ]] && break
   if [[ $attempt -eq 1 ]]; then
-    printf '%s  Напиши боту @%s любое сообщение (или нажми START).%s\n' "$_y" "$BOTNAME" "$_0"
-    echo   "  Жду до 60 секунд..."
+    printf '%s  Send bot @%s any message (or press START).%s\n' "$_y" "$BOTNAME" "$_0"
+    echo   "  Waiting up to 60 seconds..."
   fi
   sleep 3
 done
 
 if [[ -z "$CHAT_ID" ]]; then
-  printf '%sНе дождался сообщения.%s\n' "$_r" "$_0" >&2
-  echo "Открой в Telegram @${BOTNAME}, нажми START и запусти скрипт снова." >&2
+  printf '%sNo message arrived.%s\n' "$_r" "$_0" >&2
+  echo "Open @${BOTNAME} in Telegram, press START and run the script again." >&2
   exit 1
 fi
 
@@ -65,9 +65,9 @@ NAME="$(curl -fsS --max-time 15 "${API}/getUpdates" \
   | jq -r '[.result[]?.message.chat | select(.id=='"$CHAT_ID"')] | last | (.first_name // "") + " (@" + (.username // "?") + ")"')"
 printf '%s  ok%s chat_id %s — %s\n' "$_g" "$_0" "$CHAT_ID" "$NAME"
 
-# Пишем в move.env, заменяя существующие значения, а не плодя дубли.
-echo "Прописываю в ${ENVF}..."
-sudo test -f "$ENVF" || { printf '%sНет %s — сначала: sudo ~/shibuya/bootstrap.sh --only 80%s\n' "$_r" "$ENVF" "$_0" >&2; exit 1; }
+# Written into move.env by replacing existing values rather than duplicating them.
+echo "Writing to ${ENVF}..."
+sudo test -f "$ENVF" || { printf '%sNo %s — run this first: sudo ~/shibuya/bootstrap.sh --only 80%s\n' "$_r" "$ENVF" "$_0" >&2; exit 1; }
 
 sudo cp -a "$ENVF" "${ENVF}.bak"
 sudo sed -i \
@@ -75,21 +75,21 @@ sudo sed -i \
   -e "s|^TELEGRAM_CHAT_ID=.*|TELEGRAM_CHAT_ID=\"${CHAT_ID}\"|" \
   "$ENVF"
 sudo chmod 600 "$ENVF"
-printf '%s  ok%s записано (старая копия: %s.bak)\n' "$_g" "$_0" "$ENVF"
+printf '%s  ok%s written (previous copy: %s.bak)\n' "$_g" "$_0" "$ENVF"
 
-echo "Отправляю тестовое сообщение..."
+echo "Sending a test message..."
 if curl -fsS --max-time 15 \
      -d "chat_id=${CHAT_ID}" \
-     --data-urlencode "text=shibuya: бот подключён. Сюда будут приходить уведомления о перезагрузке, смене публичного IP и суточный heartbeat." \
+     --data-urlencode "text=shibuya: bot connected. Reboot notifications, public IP changes and the daily heartbeat will arrive here." \
      "${API}/sendMessage" >/dev/null; then
-  printf '%s  ok%s проверь Telegram\n' "$_g" "$_0"
+  printf '%s  ok%s check Telegram\n' "$_g" "$_0"
 else
-  printf '%sОтправить не удалось.%s\n' "$_r" "$_0" >&2
+  printf '%sSending failed.%s\n' "$_r" "$_0" >&2
   exit 1
 fi
 
 cat <<EOF
 
-Дальше включить сами уведомления:
+Next, enable the notifications themselves:
     sudo ~/shibuya/bootstrap.sh --only 80
 EOF

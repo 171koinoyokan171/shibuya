@@ -1,135 +1,135 @@
 # shibuya — runbook
 
-Raspberry Pi 5, Ubuntu 24.04 arm64. Рабочий сервер для работы с телефона через mosh.
+Raspberry Pi 5, Ubuntu 24.04 arm64. A working server I reach from my phone over mosh.
 
-## Как подключиться
+## How to connect
 
-| Откуда | Команда |
+| From | Command |
 |---|---|
-| Мак, дома | `mosh -p 60000:60010 koinoyokan171@shibuya.local` |
-| Мак, через Tailscale | `mosh -p 60000:60010 koinoyokan171@shibuya` |
-| iPhone (Blink) | профиль `shibuya` — Tailscale-имя, mosh, порты `60000:60010` |
-| iPhone, резерв | профиль `shibuya-wan` — белый IP родителей, проброшенный TCP-порт |
+| Mac, at home | `mosh -p 60000:60010 koinoyokan171@shibuya.local` |
+| Mac, over Tailscale | `mosh -p 60000:60010 koinoyokan171@shibuya` |
+| iPhone (Blink) | profile `shibuya` — Tailscale name, mosh, ports `60000:60010` |
+| iPhone, fallback | profile `shibuya-wan` — public IP at my parents' place, forwarded TCP port |
 
-Логин сразу кидает в tmux-сессию `main` — работа переживает разрыв связи,
-перезагрузку телефона и разряд батареи. Префикс tmux — `C-a`, мышь включена
-(тап переключает панель, скролл пальцем листает историю).
+Logging in drops you straight into the tmux session `main`, so work survives a dropped
+connection, a phone reboot and a dead battery. The tmux prefix is `C-a`, mouse mode is on
+(tap switches pane, swipe scrolls back through history).
 
-## Раскатка и изменения
+## Deploying and making changes
 
-Всё настраивается идемпотентными скриптами. Менять систему руками не нужно —
-правь скрипт и раскатывай, тогда конфигурация воспроизводима (и переезд на SSD
-сведётся к одному прогону).
+Everything is configured by idempotent scripts. There is no need to touch the system by
+hand — edit a script and deploy, and the configuration stays reproducible (moving to an
+SSD then comes down to a single run).
 
 ```bash
-# с Мака
+# from the Mac
 cd ~/shibuya
-./deploy.sh                      # только синхронизировать
-./deploy.sh --run                # синхронизировать и прогнать фазу A
-./deploy.sh --run --only 20      # один скрипт
-./bootstrap.sh --list            # что вообще есть
+./deploy.sh                      # sync only
+./deploy.sh --run                # sync and run phase A
+./deploy.sh --run --only 20      # a single script
+./bootstrap.sh --list            # see what exists
 
-# на Pi
-~/shibuya/verify.sh              # приёмочная проверка
+# on the Pi
+~/shibuya/verify.sh              # acceptance check
 ```
 
-Повторный прогон безопасен: скрипты ничего не делают, если состояние уже
-достигнуто. Оригиналы всех тронутых системных файлов — в `/etc/shibuya/backups/`.
+Re-running is safe: a script does nothing if the state is already in place. Originals of
+every system file touched are kept in `/etc/shibuya/backups/`.
 
-## Если пропал доступ
+## If access is lost
 
-Порядок от дешёвого к дорогому.
+Cheapest first.
 
-1. **Проверить, какой канал жив.** Tailscale и проброс портов независимы:
+1. **Check which channel is alive.** Tailscale and port forwarding are independent:
    ```bash
-   tailscale status              # с Мака
-   nc -vz <белый IP> <порт>      # проброс
+   tailscale status              # from the Mac
+   nc -vz <public IP> <port>     # port forward
    ```
-2. **Публичный IP сменился?** Приходит уведомлением в Telegram. Проброс на
-   роутере родителей после этого ведёт не туда — нужен новый IP или DDNS.
-3. **Tailscale выпал.** Самая частая причина — истёк ключ ноды. Проверить в
-   [admin-консоли](https://login.tailscale.com/admin/machines); key expiry для
-   `shibuya` должен быть **отключён**.
-4. **Машина не отвечает вообще.** Самолечение (`shibuya-netcheck.timer`) само
-   перезапускает сеть через 15 минут отсутствия связи и перезагружает машину
-   через 30. Watchdog перезагружает при зависании ядра. То есть подождать
-   ~30 минут — это осмысленная стратегия, а не бездействие.
-5. **Ничего не помогло** — позвонить родителям: «выдерни питание из коробочки,
-   подожди 10 секунд, воткни обратно».
+2. **Did the public IP change?** A Telegram notification is sent when it does. After that
+   the forward on my parents' router points nowhere — it needs the new IP, or DDNS.
+3. **Tailscale dropped.** Usually an expired node key. Check the
+   [admin console](https://login.tailscale.com/admin/machines); key expiry for `shibuya`
+   should be **disabled**.
+4. **The machine does not answer at all.** Self-healing (`shibuya-netcheck.timer`) restarts
+   networking after 15 minutes without connectivity and reboots the machine after 30. The
+   watchdog reboots on a kernel hang. So waiting ~30 minutes is a deliberate strategy, not
+   doing nothing.
+5. **Nothing helped** — call my parents: "pull the power out of the little box, wait ten
+   seconds, plug it back in."
 
-### Заблокировал себя firewall-ом
+### Locked myself out with the firewall
 
-При включении ufw скрипт взводит таймер автоотката на 10 минут. Если связь
-после включения пропала — просто подожди, ufw выключится сам. Отменяется
-вручную после проверки связи:
+When ufw is enabled the script arms a 10-minute auto-rollback timer. If the connection
+drops right after enabling it, just wait — ufw turns itself off. Cancel it by hand once
+you have confirmed connectivity:
 
 ```bash
 sudo systemctl stop shibuya-ufw-rollback.timer
 ```
 
-### Сломал sshd
+### Broke sshd
 
-`20-hardening.sh` валидирует конфиг через `sshd -t` до перезагрузки и
-откатывает drop-in, если конфиг не прошёл. Делает `reload`, а не `restart` —
-уже открытые сессии выживают. Если всё же сломано: зайти по Tailscale
-(отдельный канал) и вернуть файл из `/etc/shibuya/backups/`.
+`20-hardening.sh` validates the config with `sshd -t` before reloading and rolls the
+drop-in back if validation fails. It does a `reload`, not a `restart` — existing sessions
+survive. If it is broken anyway: get in over Tailscale (a separate channel) and restore
+the file from `/etc/shibuya/backups/`.
 
-## Если машину скомпрометировали
+## If the machine is compromised
 
-Написано заранее, чтобы в нужный момент не думать. Порядок важен —
-сначала отрезать доступ, потом разбираться.
+Written up front so there is nothing to figure out in the moment. The order matters — cut
+access first, investigate afterwards.
 
 ```bash
-# 1. Выкинуть машину из тайлнета (с любого другого устройства)
-#    admin-консоль -> Machines -> shibuya -> Remove
+# 1. Remove the machine from the tailnet (from any other device)
+#    admin console -> Machines -> shibuya -> Remove
 
-# 2. Отозвать облачные креды
+# 2. Revoke cloud credentials
 gcloud auth revoke --all
-#    + GCP Console -> IAM -> Service accounts / сессии пользователя
+#    + GCP Console -> IAM -> service accounts / user sessions
 
-# 3. Удалить SSH-ключи Pi из GitHub
-gh ssh-key list        # найти 'shibuya-pi (skelar)' и 'shibuya-pi (personal)'
+# 3. Delete the Pi's SSH keys from GitHub
+gh ssh-key list        # find 'shibuya-pi (skelar)' and 'shibuya-pi (personal)'
 gh ssh-key delete <id>
 
-# 4. Отозвать токен Claude Code
-#    claude.ai -> Settings -> ротация
+# 4. Revoke the Claude Code token
+#    claude.ai -> Settings -> rotate
 
-# 5. Убрать проброс портов на роутере родителей
+# 5. Remove the port forward on my parents' router
 ```
 
-Ключи на Pi намеренно **отдельные** от ключей Мака — рабочий ноут при этом
-не затронут, ротация ограничена одной машиной.
+The keys on the Pi are deliberately **separate** from the Mac's keys — the work laptop is
+untouched and rotation stays scoped to one machine.
 
-## Что знать про эту машину
+## Things to know about this machine
 
-- **Загрузка с SD-карты.** Расходник: деградирует от записи, через год-два
-  уходит в read-only. Логи ограничены 200 МБ, swap вынесен в zram (в RAM),
-  `noatime` включён — но переезд на USB SSD всё равно вопрос времени.
-- **Автоматический ребут в 04:00**, если приехали security-обновления ядра.
-  tmux-сессии при этом умирают. Это осознанный размен: непропатченное ядро на
-  машине, торчащей в интернет, хуже потерянной сессии, а регулярный ребут ещё
-  и проверяет, что машина умеет загружаться — пока это можно починить руками.
-- **Группа `docker` эквивалентна root.** На однопользовательской машине это
-  сознательный размен на удобство.
-- **Ключ клиентского контекста `pt` на машину не положен.** Если понадобится:
-  `sudo SHIBUYA_WITH_PT=1 ~/shibuya/bootstrap.sh --only 70`.
+- **It boots from an SD card.** A consumable: it degrades with writes and goes read-only
+  after a year or two. Logs are capped at 200 MB, swap lives in zram (in RAM) and `noatime`
+  is on — but moving to a USB SSD is still a matter of time.
+- **Automatic reboot at 04:00** if kernel security updates have landed. tmux sessions die
+  with it. That is a deliberate trade: an unpatched kernel on a machine exposed to the
+  internet is worse than a lost session, and a regular reboot also proves the machine can
+  still boot — while that is still fixable by hand.
+- **The `docker` group is equivalent to root.** On a single-user machine that is a
+  conscious trade for convenience.
+- **The client-context key `pt` is deliberately not on this machine.** If it is ever
+  needed: `sudo SHIBUYA_WITH_PT=1 ~/shibuya/bootstrap.sh --only 70`.
 
-## Памятка родителям (распечатать)
+## Note for my parents (print this)
 
-> **Коробочка «shibuya»**
+> **The "shibuya" box**
 >
-> Маленький компьютер размером с пачку сигарет. Работает круглосуточно,
-> шуметь не должен, греться до тёплого — нормально.
+> A small computer about the size of a cigarette pack. It runs around the clock, it should
+> not make noise, and getting warm to the touch is normal.
 >
-> **Ничего делать не нужно.** Он работает сам.
+> **Nothing needs to be done.** It runs by itself.
 >
-> **Если Дмитрий позвонит и попросит перезагрузить:**
-> 1. Вытащить кабель питания из коробочки
-> 2. Посчитать до десяти
-> 3. Вставить обратно
-> 4. Через 2 минуты она сама выйдет на связь
+> **If Dmytro calls and asks for a reboot:**
+> 1. Pull the power cable out of the box
+> 2. Count to ten
+> 3. Plug it back in
+> 4. It comes back online on its own within 2 minutes
 >
-> **Нельзя:** выключать удлинитель/ИБП, в который она воткнута;
-> вытаскивать сетевой провод; переставлять в другое место.
+> **Do not:** switch off the power strip or UPS it is plugged into; unplug the network
+> cable; move it somewhere else.
 >
-> Телефон Дмитрия: ______________________
+> Dmytro's phone: ______________________

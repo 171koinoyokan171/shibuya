@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# ФАЗА B — подготовка к переезду: WiFi родителей, самолечение сети, уведомления.
+# PHASE B — preparing for the move: parents' WiFi, network self-healing, notifications.
 #
-# В дефолтный прогон НЕ входит: запускать осознанно, когда есть данные.
-# Настройки берутся из /etc/shibuya/move.env (создаётся из шаблона при
-# первом запуске) — чтобы пароли не лежали в git.
+# NOT part of the default run: execute it deliberately, once the details are known.
+# Settings come from /etc/shibuya/move.env (created from a template on the first
+# run) so that passwords never end up in git.
 #
 #   sudo ~/shibuya/bootstrap.sh --only 80
 set -Eeuo pipefail
@@ -15,24 +15,24 @@ ENVF="${SHIBUYA_ETC}/move.env"
 
 if [[ ! -f "$ENVF" ]]; then
   write_file "$ENVF" 0600 <<'EOF'
-# shibuya: параметры переезда. Файл НЕ в git — пароли остаются на машине.
-# Заполни и запусти:  sudo ~/shibuya/bootstrap.sh --only 80
+# shibuya: move parameters. This file is NOT in git — passwords stay on the machine.
+# Fill it in and run:  sudo ~/shibuya/bootstrap.sh --only 80
 
-# WiFi родителей. Критично: сейчас в netplan прописан только домашний SSID,
-# и без этих данных машина поднимется у родителей БЕЗ СЕТИ ВООБЩЕ.
+# My parents' WiFi. Critical: netplan currently only knows the home SSID, and
+# without these details the machine will come up at their place WITH NO NETWORK AT ALL.
 PARENTS_WIFI_SSID=""
 PARENTS_WIFI_PSK=""
 
-# Домашний WiFi — оставляем, чтобы Pi работал в обеих точках.
+# The home WiFi stays, so the Pi works in both locations.
 HOME_WIFI_SSID="autostrada"
 HOME_WIFI_PSK=""
 
-# Telegram-уведомления: загрузка, смена публичного IP, суточный heartbeat.
-# Бот создаётся у @BotFather, chat_id — у @userinfobot.
+# Telegram notifications: boot, public IP changes, daily heartbeat.
+# The bot is created with @BotFather, the chat_id comes from @userinfobot.
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_CHAT_ID=""
 EOF
-  warn "создан шаблон ${ENVF} — заполни его и запусти скрипт снова"
+  warn "template ${ENVF} created — fill it in and run the script again"
   exit 0
 fi
 
@@ -40,18 +40,18 @@ fi
 source "$ENVF"
 
 # ------------------------------------------------------------ netplan -----
-# Самая опасная точка всего переезда: если у родителей не окажется known
-# сети, машина поднимется без связи и чинится только физически.
-section "сеть: два SSID + ethernet"
+# The most dangerous point of the whole move: if no known network exists at my
+# parents' place, the machine comes up offline and can only be fixed physically.
+section "network: two SSIDs + ethernet"
 if [[ -z "${PARENTS_WIFI_SSID:-}" || -z "${PARENTS_WIFI_PSK:-}" ]]; then
-  warn "PARENTS_WIFI_SSID/PSK не заполнены в ${ENVF} — netplan НЕ трогаю"
-  warn "ОТВОЗИТЬ МАШИНУ В ТАКОМ ВИДЕ НЕЛЬЗЯ: у родителей она останется без сети"
+  warn "PARENTS_WIFI_SSID/PSK are empty in ${ENVF} — leaving netplan alone"
+  warn "DO NOT MOVE THE MACHINE LIKE THIS: it will have no network at their place"
 else
-  # Проводное соединение приоритетнее (metric ниже): стабильный линк и
-  # предсказуемый NAT для проброса портов. WiFi — автоматический резерв.
+  # Wired takes priority (lower metric): a stable link and predictable NAT for
+  # port forwarding. WiFi is the automatic fallback.
   NP=/etc/netplan/60-shibuya.yaml
   write_file "$NP" 0600 <<EOF
-# shibuya: сеть для двух локаций. Ethernet приоритетнее WiFi.
+# shibuya: networking for two locations. Ethernet takes priority over WiFi.
 network:
   version: 2
   renderer: networkd
@@ -81,35 +81,35 @@ network:
             password: "${PARENTS_WIFI_PSK}"
 EOF
   if changed; then
-    # netplan try сам откатится через 120 секунд, если конфиг разорвал связь.
-    # netplan apply такой страховки не даёт — на удалённой машине это разница
-    # между "подождать две минуты" и "ехать к родителям".
+    # netplan try rolls itself back after 120 seconds if the config kills connectivity.
+    # netplan apply offers no such safety net — on a remote machine that is the
+    # difference between "wait two minutes" and "drive to my parents".
     if timeout 150 netplan try --timeout 120 </dev/null >/dev/null 2>&1; then
-      ok "netplan принят (оба SSID + ethernet)"
+      ok "netplan accepted (both SSIDs + ethernet)"
     else
-      warn "netplan try не подтвердился — конфиг откачен, проверь вручную"
+      warn "netplan try was not confirmed — config rolled back, check it by hand"
     fi
   fi
 fi
 
 echo
-log "MAC-адреса для DHCP-резервации на роутере родителей:"
+log "MAC addresses for the DHCP reservation on my parents' router:"
 for i in eth0 wlan0; do
   m="$(cat "/sys/class/net/${i}/address" 2>/dev/null || echo '—')"
   printf '    %-6s %s\n' "$i" "$m"
 done
 
-# -------------------------------------------------------- уведомления -----
-# Смысл: узнать о перезагрузке или смене публичного IP ДО того, как
-# понадобится доступ. Иначе первый признак проблемы — это "не могу зайти
-# именно сейчас, когда очень нужно".
-section "Telegram-уведомления"
+# ------------------------------------------------------- notifications ----
+# The point: learn about a reboot or a public IP change BEFORE access is
+# actually needed. Otherwise the first sign of trouble is "I cannot get in
+# right now, exactly when I need to".
+section "Telegram notifications"
 if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_CHAT_ID:-}" ]]; then
-  warn "TELEGRAM_BOT_TOKEN/CHAT_ID не заполнены — уведомления не настраиваю"
+  warn "TELEGRAM_BOT_TOKEN/CHAT_ID are empty — skipping notification setup"
 else
   write_file /usr/local/bin/shibuya-notify 0755 <<'EOF'
 #!/usr/bin/env bash
-# Шлёт в Telegram состояние машины. Вызывается при загрузке и раз в сутки.
+# Sends the machine's state to Telegram. Called at boot and once a day.
 set -uo pipefail
 source /etc/shibuya/move.env
 
@@ -120,26 +120,26 @@ LAN_IP="$(hostname -I | awk '{print $1}')"
 IFACE="$(ip route get 1.1.1.1 2>/dev/null | awk '{print $5; exit}')"
 UP="$(uptime -p)"
 TEMP="$(awk '{printf "%.1f°C", $1/1000}' /sys/class/thermal/thermal_zone0/temp 2>/dev/null)"
-DISK="$(df -h / | awk 'NR==2{print $4" свободно ("$5" занято)"}')"
+DISK="$(df -h / | awk 'NR==2{print $4" free ("$5" used)"}')"
 
-# Публичный IP запоминаем: его смена у родителей означает, что проброс
-# портов больше не ведёт на нашу машину.
+# The public IP is remembered: a change at my parents' place means the port
+# forward no longer points at our machine.
 PREV_FILE=/etc/shibuya/state/last-public-ip
 PREV="$(cat "$PREV_FILE" 2>/dev/null || echo '')"
 CHANGED=""
 [[ -n "$PREV" && "$PREV" != "$PUB_IP" ]] && CHANGED="
 
-*ПУБЛИЧНЫЙ IP СМЕНИЛСЯ:* \`${PREV}\` -> \`${PUB_IP}\`
-Проброс портов на роутере теперь может вести не туда."
+*PUBLIC IP CHANGED:* \`${PREV}\` -> \`${PUB_IP}\`
+The port forward on the router may now point somewhere else."
 printf '%s' "$PUB_IP" > "$PREV_FILE"
 
 TEXT="*shibuya* (${REASON})
-Публичный IP: \`${PUB_IP}\`
+Public IP: \`${PUB_IP}\`
 Tailscale: \`${TS_IP}\`
-LAN: \`${LAN_IP}\` через ${IFACE}
-Аптайм: ${UP}
-Температура: ${TEMP}
-Диск: ${DISK}${CHANGED}"
+LAN: \`${LAN_IP}\` via ${IFACE}
+Uptime: ${UP}
+Temperature: ${TEMP}
+Disk: ${DISK}${CHANGED}"
 
 curl -fsS --max-time 15 \
   -d "chat_id=${TELEGRAM_CHAT_ID}" \
@@ -150,13 +150,13 @@ EOF
 
   write_file /etc/systemd/system/shibuya-notify.service 0644 <<'EOF'
 [Unit]
-Description=Сообщить в Telegram, что shibuya загрузилась
+Description=Tell Telegram that shibuya has booted
 After=network-online.target tailscaled.service
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-# Даём сети и tailscale устояться, иначе в сообщении будут пустые адреса.
+# Give the network and tailscale time to settle, or the message ships empty addresses.
 ExecStartPre=/bin/sleep 20
 ExecStart=/usr/local/bin/shibuya-notify boot
 
@@ -166,7 +166,7 @@ EOF
 
   write_file /etc/systemd/system/shibuya-heartbeat.service 0644 <<'EOF'
 [Unit]
-Description=Суточный heartbeat shibuya
+Description=Daily shibuya heartbeat
 
 [Service]
 Type=oneshot
@@ -175,7 +175,7 @@ EOF
 
   write_file /etc/systemd/system/shibuya-heartbeat.timer 0644 <<'EOF'
 [Unit]
-Description=Раз в сутки сообщать, что машина жива
+Description=Report once a day that the machine is alive
 
 [Timer]
 OnCalendar=*-*-* 09:00:00
@@ -190,20 +190,20 @@ EOF
   enable_now shibuya-heartbeat.timer
 
   if /usr/local/bin/shibuya-notify test; then
-    ok "тестовое сообщение отправлено — проверь Telegram"
+    ok "test message sent — check Telegram"
   else
-    warn "отправить не удалось: проверь токен и chat_id в ${ENVF}"
+    warn "sending failed: check the token and chat_id in ${ENVF}"
   fi
 fi
 
-# ------------------------------------------------------- самолечение -----
-# Последняя линия обороны перед поездкой к родителям: если сеть пропала и
-# сама не вернулась — перезапустить networkd, а если и это не помогло —
-# перезагрузиться. Cooldown обязателен, иначе получим цикл перезагрузок.
-section "самолечение сети"
+# ------------------------------------------------------- self-healing -----
+# The last line of defence before a drive to my parents': if the network is gone
+# and has not come back, restart networkd; if that does not help either, reboot.
+# The cooldown is mandatory, otherwise this turns into a reboot loop.
+section "network self-healing"
 write_file /usr/local/bin/shibuya-netcheck 0755 <<'EOF'
 #!/usr/bin/env bash
-# Проверяет связь. Три провала подряд -> рестарт сети. Шесть -> ребут.
+# Checks connectivity. Three failures in a row -> restart networking. Six -> reboot.
 set -uo pipefail
 
 STATE=/etc/shibuya/state
@@ -214,7 +214,7 @@ mkdir -p "$STATE"
 alive() {
   ping -c1 -W5 1.1.1.1  >/dev/null 2>&1 && return 0
   ping -c1 -W5 8.8.8.8  >/dev/null 2>&1 && return 0
-  # DNS отдельно: бывает, что пакеты ходят, а резолв сломан.
+  # DNS separately: packets sometimes flow while resolution is broken.
   getent hosts one.one.one.one >/dev/null 2>&1 && return 0
   return 1
 }
@@ -226,33 +226,33 @@ fi
 
 n=$(( $(cat "$FAILS" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$FAILS"
-logger -t shibuya-netcheck "нет связи, провал №${n}"
+logger -t shibuya-netcheck "no connectivity, failure #${n}"
 
 if [[ $n -eq 3 ]]; then
-  logger -t shibuya-netcheck "перезапускаю systemd-networkd"
+  logger -t shibuya-netcheck "restarting systemd-networkd"
   systemctl restart systemd-networkd
   systemctl restart tailscaled 2>/dev/null || true
 fi
 
 if [[ $n -ge 6 ]]; then
-  # Не чаще раза в час — иначе машина уйдёт в цикл перезагрузок и станет
-  # недоступной надёжнее, чем от самой поломки сети.
+  # At most once an hour — otherwise the machine loops through reboots and becomes
+  # more reliably unreachable than the network fault itself would make it.
   now=$(date +%s)
   last=$(cat "$LAST_REBOOT" 2>/dev/null || echo 0)
   if (( now - last > 3600 )); then
     echo "$now" > "$LAST_REBOOT"
     echo 0 > "$FAILS"
-    logger -t shibuya-netcheck "связи нет после рестарта сети — перезагружаюсь"
+    logger -t shibuya-netcheck "still no connectivity after restarting networking — rebooting"
     systemctl reboot
   else
-    logger -t shibuya-netcheck "ребут пропущен: был меньше часа назад"
+    logger -t shibuya-netcheck "reboot skipped: the last one was less than an hour ago"
   fi
 fi
 EOF
 
 write_file /etc/systemd/system/shibuya-netcheck.service 0644 <<'EOF'
 [Unit]
-Description=Проверка связи с самовосстановлением
+Description=Connectivity check with self-recovery
 
 [Service]
 Type=oneshot
@@ -261,7 +261,7 @@ EOF
 
 write_file /etc/systemd/system/shibuya-netcheck.timer 0644 <<'EOF'
 [Unit]
-Description=Проверять связь каждые 5 минут
+Description=Check connectivity every 5 minutes
 
 [Timer]
 OnBootSec=5min
@@ -274,9 +274,9 @@ EOF
 systemctl daemon-reload
 enable_now shibuya-netcheck.timer
 
-ok "80-resilience готов"
+ok "80-resilience done"
 echo
-echo "  Осталось перед переездом:"
-echo "    1. Снять образ SD-карты на Мак (точка отката)"
-echo "    2. Залогаутиться на tty1:  sudo pkill -t tty1"
-echo "    3. Распечатать памятку родителям из ~/shibuya/RUNBOOK.md"
+echo "  Left to do before the move:"
+echo "    1. Image the SD card onto the Mac (a rollback point)"
+echo "    2. Log out of tty1:  sudo pkill -t tty1"
+echo "    3. Print the note for my parents from ~/shibuya/RUNBOOK.md"

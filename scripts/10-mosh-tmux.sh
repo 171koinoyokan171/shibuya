@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Транспорт и UX под телефон: mosh, tmux с авто-attach, zsh, комфортный шелл.
+# Transport and phone-friendly UX: mosh, tmux with auto-attach, zsh, a comfortable shell.
 set -Eeuo pipefail
 source "${SHIBUYA_ROOT:?}/lib/common.sh"
 require_root
@@ -9,43 +9,43 @@ USER_NAME="$(target_user)"
 USER_HOME="$(target_home)"
 
 # ------------------------------------------------------------- mosh --------
-# mosh отказывается стартовать без UTF-8 локали — поэтому 00-base должен
-# отработать раньше. ncurses-term нужен ради терминфо tmux-256color.
+# mosh refuses to start without a UTF-8 locale, so 00-base has to run first.
+# ncurses-term is there for the tmux-256color terminfo.
 section "mosh"
 apt_install mosh ncurses-term
 ok "$(mosh-server --version 2>&1 | head -1)"
 
-# Диапазон UDP-портов фиксируем на 60000-60010 вместо дефолтных 60000-61000:
-# на роутере родителей придётся пробрасывать ровно эти порты один-в-один,
-# и пробрасывать тысячу вместо десяти — незачем.
-# Это флаг КЛИЕНТА (mosh -p 60000:60010), на сервере ничего не настраивается,
-# но записываем в state, чтобы ufw и документация брали число из одного места.
+# The UDP port range is pinned to 60000-60010 instead of the default 60000-61000:
+# these exact ports have to be forwarded one-to-one on my parents' router,
+# and forwarding a thousand instead of ten makes no sense.
+# This is a CLIENT flag (mosh -p 60000:60010); nothing is configured server-side,
+# but it is recorded in state so ufw and the docs read the number from one place.
 write_file "${SHIBUYA_ETC}/mosh-ports" 0644 <<'EOF' || true
 60000:60010
 EOF
 
 # ------------------------------------------------------------- tmux --------
-# tmux — второй слой живучести. mosh держит СВЯЗЬ, tmux держит РАБОТУ:
-# переживает и смерть mosh-server, и ребут телефона, и разрядку батареи.
+# tmux is the second layer of survivability. mosh keeps the CONNECTION, tmux keeps the WORK:
+# it survives mosh-server dying, a phone reboot and a dead battery.
 section "tmux"
 apt_install tmux
 
 install -d -o "$USER_NAME" -g "$USER_NAME" -m 0755 "${USER_HOME}/.config"
 
 write_user_file .tmux.conf 0644 <<'EOF' || true
-# shibuya: tmux под экран телефона и клавиатуру Blink Shell.
+# shibuya: tmux tuned for a phone screen and the Blink Shell keyboard.
 
-# C-a вместо C-b: на key bar в Blink Ctrl достаётся одним нажатием,
-# а 'a' ближе к левому краю, чем 'b'.
+# C-a instead of C-b: on Blink's key bar Ctrl is one tap away,
+# and 'a' sits closer to the left edge than 'b'.
 unbind C-b
 set -g prefix C-a
 bind C-a send-prefix
 
-# Главный выигрыш на телефоне: тап переключает панель, скролл пальцем
-# листает историю, границы панелей тянутся пальцем.
+# The big win on a phone: tap switches pane, a finger swipe scrolls
+# through history, and pane borders can be dragged.
 set -g mouse on
 
-# True color в Blink.
+# True color in Blink.
 set -g default-terminal "tmux-256color"
 set -ga terminal-overrides ",xterm-256color:Tc"
 
@@ -57,31 +57,31 @@ set -sg escape-time 10
 set -g focus-events on
 set -g display-time 2000
 
-# Если к одной сессии подключены телефон и ноут — не ужимать всё до размера
-# самого маленького экрана, а подгонять под активного клиента.
+# When a phone and a laptop are attached to the same session, do not shrink
+# everything to the smallest screen — follow the active client instead.
 setw -g aggressive-resize on
 
-# Копирование в vi-стиле: на телефоне без мышки это единственный вменяемый путь.
+# vi-style copy mode: on a phone without a mouse it is the only sane option.
 setw -g mode-keys vi
 bind -T copy-mode-vi v send -X begin-selection
 bind -T copy-mode-vi y send -X copy-selection-and-cancel
 
-# Сплиты в текущем каталоге, мнемоника | и -
+# Splits open in the current directory; | and - as mnemonics
 bind '|' split-window -h -c "#{pane_current_path}"
 bind '-' split-window -v -c "#{pane_current_path}"
 bind c new-window -c "#{pane_current_path}"
 
-# Перезагрузить конфиг, не выходя из сессии.
-bind r source-file ~/.tmux.conf \; display "tmux.conf перечитан"
+# Reload the config without leaving the session.
+bind r source-file ~/.tmux.conf \; display "tmux.conf reloaded"
 
-# Статус-бар компактный: на 390 пикселях ширины лишнему места нет.
-# Температура и нагрузка — потому что это Pi под нагрузкой на SD-карте,
-# и знать, что он троттлит, полезно до того, как всё встанет.
-# Подсказка "^a d" слева — чтобы с телефона не искать по памяти, как выйти
-# не убив сессию.
+# A compact status bar: there is no room to waste at 390 pixels wide.
+# Temperature and load are shown because this is a Pi under load on an SD card,
+# and knowing it is throttling is useful before everything grinds to a halt.
+# The "^a d" hint on the left saves you from recalling from memory how to leave
+# without killing the session.
 set -g status-interval 10
 set -g status-style "bg=colour236,fg=colour250"
-set -g status-left "#[bg=colour24,fg=colour255,bold] #S #[default] #[fg=colour244]^a d = отцепиться#[default] "
+set -g status-left "#[bg=colour24,fg=colour255,bold] #S #[default] #[fg=colour244]^a d = detach#[default] "
 set -g status-left-length 40
 set -g status-right "#[fg=colour244]#(cut -d' ' -f1 /proc/loadavg) #(awk '{printf \"%.0f°\", $1/1000}' /sys/class/thermal/thermal_zone0/temp) #[fg=colour250]%H:%M "
 set -g status-right-length 40
@@ -90,39 +90,39 @@ setw -g window-status-format " #I:#W "
 setw -g window-status-current-format " #I:#W "
 EOF
 
-# ------------------------------------------------------- авто-attach -------
-# При интерактивном входе по SSH/mosh сразу попадаем в постоянную сессию
-# 'main'. `new -A` = attach, если есть, иначе создать.
+# ------------------------------------------------------- auto-attach -------
+# An interactive SSH/mosh login lands straight in the persistent session
+# 'main'. `new -A` = attach if it exists, otherwise create it.
 #
-# Осознанно НЕ используем exec: если tmux по какой-то причине не стартует,
-# exec уронил бы соединение и мы бы потеряли доступ к машине. Так же
-# осознанно проверяем $TMUX (не вложиться в самих себя) и интерактивность
-# (иначе сломается scp/rsync/git-over-ssh).
-section "авто-attach в tmux"
+# exec is deliberately NOT used: if tmux fails to start for any reason,
+# exec would drop the connection and we would lose access to the machine.
+# $TMUX is checked just as deliberately (so we do not nest into ourselves),
+# along with interactivity (otherwise scp/rsync/git-over-ssh break).
+section "tmux auto-attach"
 
-# Логика живёт в ОДНОМ файле, который подключают оба шелла. Раньше сниппет
-# копировался в .bashrc и .zshrc, и правка переставала доезжать до тех rc,
-# где блок уже был — правильная версия оказывалась только в одном из них.
+# The logic lives in ONE file sourced by both shells. The snippet used to be
+# copied into .bashrc and .zshrc, and an edit stopped reaching whichever rc
+# already had the block — so the correct version lived in only one of them.
 write_file /etc/shibuya/shell-tmux.sh 0644 <<'EOF' || true
-# shibuya: поведение tmux при входе по SSH/mosh. Подключается из ~/.bashrc и ~/.zshrc.
+# shibuya: tmux behaviour on SSH/mosh login. Sourced from ~/.bashrc and ~/.zshrc.
 
-# Вход по SSH/mosh -> сразу в постоянную сессию. Работа переживает разрыв связи,
-# перезагрузку телефона и разряд батареи.
-# Намеренно без exec: если tmux не стартует, exec уронил бы соединение и мы бы
-# потеряли доступ к машине.
+# SSH/mosh login -> straight into the persistent session. Work survives a dropped link,
+# a phone reboot and a dead battery.
+# Deliberately without exec: if tmux fails to start, exec would drop the connection
+# and we would lose access to the machine.
 if [ -z "${TMUX:-}" ] && [ -n "${SSH_CONNECTION:-}" ] && [ -t 1 ] && command -v tmux >/dev/null 2>&1; then
     tmux new-session -A -s main
 fi
 
-# Защита от главной ошибки при работе с телефона: набрать exit и тем самым
-# уничтожить сессию вместе со всей работой. В последнем окне exit отцепляет
-# (как ^a d), во всех остальных случаях работает как обычно.
+# Guard against the classic phone mistake: typing exit and destroying the
+# session along with all the work. In the last window exit detaches
+# (like ^a d); everywhere else it behaves as usual.
 if [ -n "${TMUX:-}" ]; then
     if [ -n "${ZSH_VERSION:-}" ]; then setopt IGNORE_EOF; else set -o ignoreeof; fi
     exit() {
         if [ "$(tmux list-windows | wc -l)" -eq 1 ] && [ "$(tmux list-panes | wc -l)" -eq 1 ]; then
-            echo "Это последнее окно — отцепляюсь, сессия остаётся жить на Pi."
-            echo "Закрыть по-настоящему: builtin exit  (или tmux kill-session)"
+            echo "This is the last window — detaching; the session keeps running on the Pi."
+            echo "To really close it: builtin exit  (or tmux kill-session)"
             tmux detach-client
         else
             builtin exit "$@"
@@ -136,30 +136,30 @@ SOURCE_LINE='[ -f /etc/shibuya/shell-tmux.sh ] && . /etc/shibuya/shell-tmux.sh'
 for rc in .bashrc .zshrc; do
   f="${USER_HOME}/${rc}"
   touch "$f"; chown "${USER_NAME}:${USER_NAME}" "$f"
-  # Вычищаем старые inline-блоки, если остались с прошлых версий.
+  # Clean out old inline blocks left over from earlier versions.
   if grep -q 'shibuya:tmux-autoattach' "$f"; then
     backup_file "$f"
     tmp="$(mktemp)"
     awk '/# >>> shibuya:tmux-autoattach >>>/{f=1} !f{print} /# <<< shibuya:tmux-autoattach <<</{f=0}' "$f" > "$tmp"
     cat "$tmp" > "$f"; rm -f "$tmp"
     chown "${USER_NAME}:${USER_NAME}" "$f"
-    ok "старый inline-блок вычищен из ${rc}"
+    ok "old inline block removed from ${rc}"
   fi
   ensure_line "$f" "$SOURCE_LINE" 'shell-tmux.sh' \
-    && ok "подключён shell-tmux.sh в ${rc}" || skip "shell-tmux.sh уже подключён в ${rc}"
+    && ok "shell-tmux.sh sourced from ${rc}" || skip "shell-tmux.sh already sourced in ${rc}"
   chown "${USER_NAME}:${USER_NAME}" "$f"
 done
 
 # ------------------------------------------------------------- zsh ---------
-# Паритет с Маком: там zsh, мышечная память должна работать одинаково.
-# Без oh-my-zsh — на слабой машине через мобильный канал каждый лишний
-# фреймворк в старте шелла ощущается.
+# Parity with the Mac: zsh there too, so muscle memory carries over.
+# No oh-my-zsh — on a weak machine over a mobile link every extra framework
+# in shell startup is noticeable.
 section "zsh"
 apt_install zsh zsh-autosuggestions zsh-syntax-highlighting fzf
 
 write_user_file .zshrc 0644 <<'EOF' || true
-# shibuya: минимальный быстрый zsh. Тяжёлых фреймворков намеренно нет —
-# шелл стартует через мобильный канал, каждые лишние 300мс заметны.
+# shibuya: a minimal, fast zsh. Heavy frameworks are deliberately absent —
+# the shell starts over a mobile link, and every extra 300ms shows.
 
 HISTFILE=~/.zsh_history
 HISTSIZE=50000
@@ -171,8 +171,8 @@ autoload -Uz compinit && compinit -C
 zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 
-# Промпт: хост + каталог + ветка. Хост важен — легко забыть, что ты на Pi
-# и, например, снести что-то не на той машине.
+# Prompt: host + directory + branch. The host matters — it is easy to forget
+# you are on the Pi and delete something on the wrong machine.
 autoload -Uz vcs_info
 precmd() { vcs_info }
 zstyle ':vcs_info:git:*' formats ' %F{yellow}%b%f'
@@ -188,8 +188,8 @@ PROMPT='%F{cyan}%m%f %F{blue}%~%f${vcs_info_msg_0_} %(?.%F{green}.%F{red})❯%f 
 [ -f /usr/share/doc/fzf/examples/completion.zsh ] && \
   source /usr/share/doc/fzf/examples/completion.zsh
 
-# Стрелки листают историю по уже набранному префиксу — экономит нажатия,
-# а на телефоне каждое нажатие дорогое.
+# Arrows search history by the prefix already typed — it saves keystrokes,
+# and on a phone every keystroke is expensive.
 autoload -U up-line-or-beginning-search down-line-or-beginning-search
 zle -N up-line-or-beginning-search
 zle -N down-line-or-beginning-search
@@ -208,18 +208,18 @@ command -v fdfind >/dev/null && alias fd='fdfind'
 export EDITOR=vim
 export PATH="$HOME/.local/bin:$PATH"
 
-# Поведение tmux (авто-attach + защита от exit) — в общем файле,
-# чтобы одна и та же логика не расходилась между .bashrc и .zshrc.
+# tmux behaviour (auto-attach + exit guard) lives in the shared file so the
+# same logic cannot drift apart between .bashrc and .zshrc.
 [ -f /etc/shibuya/shell-tmux.sh ] && . /etc/shibuya/shell-tmux.sh
 EOF
 
 if [[ "$(getent passwd "$USER_NAME" | cut -d: -f7)" == "/usr/bin/zsh" ]]; then
-  skip "zsh уже логин-шелл"
+  skip "zsh is already the login shell"
 else
   chsh -s /usr/bin/zsh "$USER_NAME"
-  ok "логин-шелл переключён на zsh"
+  ok "login shell switched to zsh"
 fi
 
-ok "10-mosh-tmux готов"
+ok "10-mosh-tmux done"
 echo
-echo "  Подключение с Мака:  mosh -p 60000:60010 ${USER_NAME}@shibuya.local"
+echo "  Connect from the Mac:  mosh -p 60000:60010 ${USER_NAME}@shibuya.local"

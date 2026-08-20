@@ -48,8 +48,8 @@ Machine-specific secrets (Wi-Fi passwords, bot tokens, hardware identifiers)
 are never committed — they live outside this repo or under the gitignored
 `secrets/` directory, generated or filled in per-machine.
 
-## Docs are in Russian
+## Docs
 
-`STATUS.md` and `RUNBOOK.md` are written in Russian (that's the language this
-was built in); this README is in English so the repo itself is legible to
-anyone browsing GitHub.
+`STATUS.md` carries the project state and the reasoning behind the hardware
+choices; `RUNBOOK.md` is the operational playbook — how to connect, what to do
+when access is lost, and the procedure if the machine is ever compromised.
